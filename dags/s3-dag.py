@@ -1,37 +1,61 @@
-"""
-S3 Sensor Connection Test
-"""
-
 from airflow import DAG
-from airflow.operators import SimpleHttpOperator, HttpSensor,   BashOperator, EmailOperator, S3KeySensor
-from datetime import datetime, timedelta
+from airflow.operators.dummy_operator import DummyOperator
+from airflow.operators.python_operator import PythonOperator
 
+from airflow.hooks import S3Hook
+from datetime import datetime, timedelta
+import os
+
+
+S3_CONN_ID='aws_s3'
+BUCKET='s3-bucket-to-watch-mlops'
+
+name='pawan' #swap your name here
+
+
+def upload_to_s3(file_name):
+
+    # Instanstiaute
+    s3_hook=S3Hook(aws_conn_id=S3_CONN_ID) 
+    
+    # Create file
+    sample_file = "{0}_file_{1}.txt".format(name, file_name) #swap your name here
+    example_file = open(sample_file, "w+")
+    example_file.write("Putting some data in for task {0}".format(file_name))
+    example_file.close()
+    
+    s3_hook.load_file(sample_file, 'globetelecom/{0}'.format(sample_file), bucket_name=BUCKET, replace=True)
+
+    
+
+
+# Default settings applied to all tasks
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
-    'start_date': datetime(2016, 11, 1),
-    'email': ['pawan-kumar-b-h@hpe.com'],
     'email_on_failure': False,
     'email_on_retry': False,
-    'retries': 5,
+    'retries': 1,
     'retry_delay': timedelta(minutes=5)
 }
 
-dag = DAG('s3_dag_test', default_args=default_args, schedule_interval= '@once')
 
-t1 = BashOperator(
-    task_id='bash_test',
-    bash_command='echo "hello, it should work" > s3_conn_test.txt',
-    dag=dag)
+# Using a DAG context manager, you don't have to specify the dag property of each task
+with DAG('s3_upload',
+         start_date=datetime(2019, 1, 1),
+         max_active_runs=1,
+         schedule_interval='0 12 8-14,22-28 * 6',  # https://airflow.apache.org/docs/stable/scheduler.html#dag-runs
+         default_args=default_args,
+         catchup=False # enable if you don't want historical dag runs to run
+         ) as dag:
 
-sensor = S3KeySensor(
-    task_id='check_s3_for_file_in_s3',
-    bucket_key='file-to-watch-*',
-    wildcard_match=True,
-    bucket_name='s3-bucket-to-watch-mlops',
-    s3_conn_id='aws_s3',
-    timeout=18*60*60,
-    poke_interval=120,
-    dag=dag)
+    t0 = DummyOperator(task_id='start')
 
-t1.set_upstream(sensor)
+    for i in range(0,5): # generates 10 tasks
+        generate_files=PythonOperator(
+            task_id='generate_file_{0}_{1}'.format(name, i), # task id is generated dynamically
+            python_callable=upload_to_s3,
+            op_kwargs= {'file_name': i}
+        )
+
+        t0 >> generate_files
