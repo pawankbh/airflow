@@ -2,7 +2,7 @@ from airflow import DAG
 from airflow.operators.dummy_operator import DummyOperator
 from airflow.operators.python_operator import PythonOperator
 
-from airflow.hooks import S3Hook
+from airflow.hooks.S3_hook import S3Hook
 from datetime import datetime, timedelta
 import os
 
